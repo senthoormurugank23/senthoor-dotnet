@@ -1,23 +1,60 @@
-namespace BaseDotnet.Processor;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using BaseDotnet.Application.Interfaces;
 
-public class Worker : BackgroundService
+namespace BaseDotnet.Processor
 {
-    private readonly ILogger<Worker> _logger;
-
-    public Worker(ILogger<Worker> logger)
+    public class Worker : BackgroundService
     {
-        _logger = logger;
-    }
+        private readonly ILogger<Worker> _logger;
+        private readonly IServiceProvider _serviceProvider;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        while (!stoppingToken.IsCancellationRequested)
+        public Worker(ILogger<Worker> logger, IServiceProvider serviceProvider)
         {
-            if (_logger.IsEnabled(LogLevel.Information))
+            _logger = logger;
+            _serviceProvider = serviceProvider;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            _logger.LogInformation("Background Processor started.");
+
+            while (!stoppingToken.IsCancellationRequested)
             {
-                _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
+                _logger.LogInformation("Background Processor checking for tasks at: {time}", DateTimeOffset.Now);
+
+                try
+                {
+                    // Create a service scope to resolve scoped services like IProductService or DbContext
+                    using (var scope = _serviceProvider.CreateScope())
+                    {
+                        var productService = scope.ServiceProvider.GetRequiredService<IProductService>();
+                        var result = await productService.GetAllAsync(stoppingToken);
+
+                        if (result.IsSuccess)
+                        {
+                            _logger.LogInformation("Successfully processed scheduled task. Total products retrieved: {Count}", result.Value?.Count ?? 0);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("Failed to retrieve products: {Error}", result.Message);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "An error occurred while executing the background task.");
+                }
+
+                // Run every 10 seconds for demo purposes
+                await Task.Delay(10000, stoppingToken);
             }
-            await Task.Delay(1000, stoppingToken);
+
+            _logger.LogInformation("Background Processor stopping.");
         }
     }
 }
